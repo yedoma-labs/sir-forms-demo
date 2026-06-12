@@ -1,0 +1,14 @@
+{
+  "features": {
+    "enableAnalytics": true,
+    "enableLogging": true
+  },
+  "api": {
+    "baseUrl": "${NEXT_PUBLIC_API_URL}",
+    "timeout": 15000
+  },
+  "database": {
+    "host": "${DB_HOST}",
+    "name": "${DB_NAME}"
+  }
+}

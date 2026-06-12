@@ -1,0 +1,14 @@
+{
+  "features": {
+    "enableAnalytics": true,
+    "enableLogging": true
+  },
+  "api": {
+    "baseUrl": "${STAGING_API_URL}",
+    "timeout": 20000
+  },
+  "database": {
+    "host": "${STAGING_DB_HOST}",
+    "name": "demo_staging"
+  }
+}

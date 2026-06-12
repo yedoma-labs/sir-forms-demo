@@ -1,0 +1,14 @@
+{
+  "features": {
+    "enableAnalytics": false,
+    "enableLogging": true
+  },
+  "api": {
+    "baseUrl": "http://localhost:3000/api",
+    "timeout": 60000
+  },
+  "database": {
+    "host": "localhost",
+    "name": "demo_dev"
+  }
+}

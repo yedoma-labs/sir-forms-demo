@@ -1,0 +1,1148 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import Link from 'next/link'
+import {
+  DateTime,
+  Duration,
+  LocalDate,
+  LocalTime,
+  Timezone,
+  es, fr, de, ja, zh, ru, ar, ko, pt, it,
+} from '@yedoma-labs/tuuru-chrono-tz'
+
+// ─── Config ───────────────────────────────────────────────────────────────────
+
+const WORLD_CITIES = [
+  { city: 'New York',     tz: 'America/New_York',     flag: '🇺🇸', gradient: 'linear-gradient(135deg,#1e3a8a,#3b82f6)' },
+  { city: 'London',       tz: 'Europe/London',         flag: '🇬🇧', gradient: 'linear-gradient(135deg,#4c1d95,#8b5cf6)' },
+  { city: 'Paris',        tz: 'Europe/Paris',          flag: '🇫🇷', gradient: 'linear-gradient(135deg,#831843,#ec4899)' },
+  { city: 'Dubai',        tz: 'Asia/Dubai',            flag: '🇦🇪', gradient: 'linear-gradient(135deg,#78350f,#f59e0b)' },
+  { city: 'Mumbai',       tz: 'Asia/Kolkata',          flag: '🇮🇳', gradient: 'linear-gradient(135deg,#7f1d1d,#ef4444)' },
+  { city: 'Tokyo',        tz: 'Asia/Tokyo',            flag: '🇯🇵', gradient: 'linear-gradient(135deg,#064e3b,#10b981)' },
+  { city: 'Sydney',       tz: 'Australia/Sydney',      flag: '🇦🇺', gradient: 'linear-gradient(135deg,#0e7490,#06b6d4)' },
+  { city: 'Los Angeles',  tz: 'America/Los_Angeles',   flag: '🇺🇸', gradient: 'linear-gradient(135deg,#312e81,#6366f1)' },
+]
+
+const LOCALE_SHOWCASE = [
+  { locale: es, name: 'Español',   flag: '🇪🇸' },
+  { locale: fr, name: 'Français',  flag: '🇫🇷' },
+  { locale: de, name: 'Deutsch',   flag: '🇩🇪' },
+  { locale: ja, name: '日本語',     flag: '🇯🇵' },
+  { locale: zh, name: '中文',       flag: '🇨🇳' },
+  { locale: ru, name: 'Русский',   flag: '🇷🇺' },
+  { locale: ar, name: 'العربية',   flag: '🇸🇦' },
+  { locale: ko, name: '한국어',     flag: '🇰🇷' },
+  { locale: pt, name: 'Português', flag: '🇧🇷' },
+  { locale: it, name: 'Italiano',  flag: '🇮🇹' },
+]
+
+const ACCENT_COLORS = [
+  '#3b82f6','#8b5cf6','#ec4899','#f59e0b','#ef4444','#10b981',
+  '#06b6d4','#6366f1','#fb923c','#34d399','#60a5fa','#a78bfa','#f472b6',
+]
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+
+function fmtOffset(mins: number): string {
+  const sign = mins >= 0 ? '+' : '-'
+  const abs  = Math.abs(mins)
+  const h    = Math.floor(abs / 60).toString().padStart(2, '0')
+  const m    = (abs % 60).toString().padStart(2, '0')
+  return `UTC${sign}${h}:${m}`
+}
+
+// ─── Shared UI ────────────────────────────────────────────────────────────────
+
+function CodeBlock({ code }: { code: string }) {
+  return (
+    <pre style={{
+      background: '#020817', color: '#e2e8f0', padding: '1.25rem',
+      borderRadius: '10px', fontSize: '0.775rem', overflowX: 'auto',
+      fontFamily: "'Fira Code','Cascadia Code','Consolas',monospace", lineHeight: 1.7,
+      border: '1px solid #1e293b',
+    }}>
+      <code>{code}</code>
+    </pre>
+  )
+}
+
+function SectionHeader({
+  emoji, title, subtitle, gradient,
+}: { emoji: string; title: string; subtitle: string; gradient: string }) {
+  return (
+    <div style={{ marginBottom: '1.75rem' }}>
+      <div style={{
+        display: 'inline-flex', alignItems: 'center', gap: '0.6rem',
+        background: gradient, padding: '0.4rem 1.1rem', borderRadius: '2rem', marginBottom: '0.6rem',
+      }}>
+        <span style={{ fontSize: '1.1rem' }}>{emoji}</span>
+        <h2 style={{ color: 'white', fontSize: '1.1rem', fontWeight: 800, margin: 0 }}>{title}</h2>
+      </div>
+      <p style={{ color: '#64748b', fontSize: '0.85rem', marginLeft: '0.25rem' }}>{subtitle}</p>
+    </div>
+  )
+}
+
+function Chip({
+  label, value, color = '#a78bfa',
+}: { label: string; value: string; color?: string }) {
+  return (
+    <div style={{
+      background: '#0a0f1e', border: '1px solid #1e293b', borderRadius: '8px',
+      padding: '0.6rem 0.8rem',
+    }}>
+      <div style={{ color: '#475569', fontSize: '0.65rem', fontFamily: 'monospace', marginBottom: '0.25rem' }}>{label}</div>
+      <div style={{ color, fontSize: '0.88rem', fontFamily: 'monospace', fontWeight: 700 }}>{value || '—'}</div>
+    </div>
+  )
+}
+
+// ─── World Clock ──────────────────────────────────────────────────────────────
+
+function WorldClock() {
+  type ClockData = { time: string; date: string; offset: string; abbr: string; isDST: boolean }
+  const [times, setTimes] = useState<Record<string, ClockData>>({})
+
+  useEffect(() => {
+    const update = () => {
+      const now = Date.now()
+      const next: Record<string, ClockData> = {}
+      for (const { tz } of WORLD_CITIES) {
+        const dt = DateTime.now(tz)
+        next[tz] = {
+          time:   dt.format('HH:mm:ss'),
+          date:   dt.format('ddd, MMM D'),
+          offset: fmtOffset(dt.offset),
+          abbr:   Timezone.getAbbreviation(tz, now),
+          isDST:  Timezone.isDST(tz, now),
+        }
+      }
+      setTimes(next)
+    }
+    update()
+    const id = setInterval(update, 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  if (!Object.keys(times).length) {
+    return <div style={{ color: '#475569', fontFamily: 'monospace', padding: '2rem', textAlign: 'center' }}>Initialising clocks…</div>
+  }
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(210px,1fr))', gap: '1rem' }}>
+      {WORLD_CITIES.map(({ city, tz, flag, gradient }) => {
+        const d = times[tz]
+        if (!d) return null
+        return (
+          <div key={tz} style={{
+            background: gradient, borderRadius: '16px', padding: '1.25rem',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.25)', position: 'relative', overflow: 'hidden',
+          }}>
+            <div style={{ position: 'absolute', top: -20, right: -10, fontSize: '5rem', opacity: 0.12, pointerEvents: 'none' }}>
+              {flag}
+            </div>
+            <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '0.2rem' }}>
+              {flag} {city}
+            </div>
+            <div style={{ color: 'white', fontSize: '2.1rem', fontWeight: 900, fontFamily: 'monospace', letterSpacing: '-0.02em', lineHeight: 1 }}>
+              {d.time}
+            </div>
+            <div style={{ color: 'rgba(255,255,255,0.75)', fontSize: '0.78rem', marginTop: '0.35rem' }}>{d.date}</div>
+            <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              {[d.offset, d.abbr].map(tag => (
+                <span key={tag} style={{
+                  background: 'rgba(255,255,255,0.18)', color: 'white',
+                  padding: '0.1rem 0.45rem', borderRadius: '4px',
+                  fontSize: '0.65rem', fontFamily: 'monospace', fontWeight: 700,
+                }}>{tag}</span>
+              ))}
+              {d.isDST && (
+                <span style={{
+                  background: 'rgba(251,191,36,0.3)', color: '#fef3c7',
+                  padding: '0.1rem 0.45rem', borderRadius: '4px',
+                  fontSize: '0.65rem', fontWeight: 700,
+                }}>DST</span>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Construction Lab ─────────────────────────────────────────────────────────
+
+function ConstructionLab() {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+  if (!mounted) return null
+
+  const now       = DateTime.now('America/New_York')
+  const fromISO   = DateTime.fromISO('2024-07-04T09:30:00-04:00')
+  const fromFmt   = DateTime.fromFormat('25/12/2024 8:00 PM', 'DD/MM/YYYY h:mm A', { timezone: 'Europe/London' })
+  const fromObj   = DateTime.fromObject({ year: 2025, month: 1, day: 1, hour: 0 }, { timezone: 'Asia/Tokyo' })
+  const epoch     = DateTime.fromMilliseconds(0, 'UTC')
+  const fromUnix  = DateTime.fromUnix(1_700_000_000, 'America/Chicago')
+  const fromDate  = DateTime.fromDate(new Date('2024-03-14T15:09:26'), 'Europe/Berlin')
+
+  const examples = [
+    { m: `DateTime.now('America/New_York')`,                        v: now.format('YYYY-MM-DD HH:mm:ss Z') },
+    { m: `DateTime.nowUTC()`,                                        v: DateTime.nowUTC().toISO() },
+    { m: `DateTime.fromISO('2024-07-04T09:30:00-04:00')`,           v: fromISO.format('ddd, MMMM D YYYY · HH:mm Z') },
+    { m: `DateTime.fromFormat('25/12/2024 8:00 PM', 'DD/MM/YYYY h:mm A', { timezone: 'Europe/London' })`,
+                                                                     v: fromFmt.toISO() },
+    { m: `DateTime.fromObject({ year: 2025, month: 1, day: 1, hour: 0 }, { timezone: 'Asia/Tokyo' })`,
+                                                                     v: fromObj.format('YYYY-MM-DD HH:mm:ss [JST]') },
+    { m: `DateTime.fromMilliseconds(0, 'UTC')  // Unix epoch`,       v: epoch.format('ddd, MMMM D YYYY · HH:mm:ss [UTC]') },
+    { m: `DateTime.fromUnix(1_700_000_000, 'America/Chicago')`,     v: fromUnix.format('YYYY-MM-DD HH:mm:ss Z') },
+    { m: `DateTime.fromDate(new Date('2024-03-14T15:09:26'), 'Europe/Berlin')`,
+                                                                     v: fromDate.format('YYYY-MM-DD HH:mm:ss Z') },
+    { m: `DateTime.min(fromISO, fromObj)`,                           v: DateTime.min(fromISO, fromObj).format('YYYY-MM-DD') },
+    { m: `DateTime.max(fromISO, fromObj)`,                           v: DateTime.max(fromISO, fromObj).format('YYYY-MM-DD') },
+    { m: `now.isValid()`,                                            v: String(now.isValid()) },
+    { m: `now.quarter`,                                              v: String(now.quarter) },
+    { m: `now.dayOfYear`,                                            v: String(now.dayOfYear) },
+    { m: `now.weekOfYear`,                                           v: String(now.weekOfYear) },
+    { m: `now.daysInMonth`,                                          v: String(now.daysInMonth) },
+    { m: `now.isLeapYear`,                                           v: String(now.isLeapYear) },
+    { m: `now.weekday  // 1=Mon … 7=Sun`,                           v: String(now.weekday) },
+    { m: `now.offset   // minutes east-positive`,                    v: String(now.offset) },
+    { m: `now.toUnix()`,                                             v: String(now.toUnix()) },
+    { m: `now.timezone`,                                             v: now.timezone },
+  ]
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      {examples.map(({ m, v }, i) => (
+        <div key={m} style={{
+          background: '#0a0f1e', borderLeft: `3px solid ${ACCENT_COLORS[i % ACCENT_COLORS.length]}`,
+          borderRadius: '0 8px 8px 0', padding: '0.65rem 1rem',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem',
+        }}>
+          <code style={{ color: '#64748b', fontSize: '0.7rem', fontFamily: 'monospace', flexShrink: 0, maxWidth: '55%', wordBreak: 'break-all' }}>{m}</code>
+          <span style={{ color: ACCENT_COLORS[i % ACCENT_COLORS.length], fontSize: '0.82rem', fontFamily: 'monospace', fontWeight: 700, textAlign: 'right' }}>{v}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ─── Format Playground ────────────────────────────────────────────────────────
+
+const FORMAT_PRESETS = [
+  { label: 'ISO-like',    pattern: 'YYYY-MM-DD[T]HH:mm:ssZ' },
+  { label: 'Human',       pattern: 'dddd, MMMM D[,] YYYY [at] h:mm A' },
+  { label: 'Quarter',     pattern: '[Q]Q YYYY · [Week] W' },
+  { label: 'Day-of-Year', pattern: 'DDD[/]366 YYYY' },
+  { label: 'Log stamp',   pattern: '[[]YYYY-MM-DD HH:mm:ss.SSS[]] Z' },
+  { label: 'Article',     pattern: 'MMMM D, YYYY' },
+  { label: 'Short',       pattern: 'ddd MMM D HH:mm' },
+  { label: 'Time only',   pattern: 'h:mm:ss A [·] Z' },
+]
+
+const FORMAT_TOKENS = [
+  ['YYYY','4-digit year'],['YY','2-digit year'],['Q','quarter'],
+  ['MMMM','Full month'],['MMM','Short month'],['MM','Padded month'],['M','Month num'],
+  ['DD','Padded day'],['D','Day'],['DDDD','Padded day-of-year'],['DDD','Day-of-year'],
+  ['WW','ISO week padded'],['W','ISO week'],['dddd','Weekday full'],['ddd','Weekday short'],
+  ['HH','24h padded'],['H','24h'],['hh','12h padded'],['h','12h'],
+  ['mm','Minute'],['ss','Second'],['SSS','Millisecond'],
+  ['A','AM/PM'],['a','am/pm'],['Z','Offset +09:00'],['ZZ','Offset +0900'],['[text]','Literal'],
+]
+
+function FormatPlayground() {
+  const [pattern, setPattern] = useState('dddd, MMMM D[,] YYYY [at] h:mm A')
+  const [tz, setTz] = useState('America/New_York')
+  const [result, setResult] = useState('')
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    try {
+      setResult(DateTime.now(tz).format(pattern))
+      setErr('')
+    } catch (e) {
+      setErr(String(e))
+      setResult('')
+    }
+  }, [pattern, tz])
+
+  return (
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '1rem', marginBottom: '0.75rem' }}>
+        <div>
+          <div style={{ color: '#64748b', fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.4rem' }}>Format Pattern</div>
+          <input
+            value={pattern}
+            onChange={e => setPattern(e.target.value)}
+            style={{
+              width: '100%', padding: '0.65rem 0.8rem', background: '#0a0f1e',
+              border: '1px solid #1e293b', borderRadius: '8px',
+              color: '#e2e8f0', fontSize: '0.88rem', fontFamily: 'monospace',
+            }}
+          />
+        </div>
+        <div>
+          <div style={{ color: '#64748b', fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.4rem' }}>Timezone</div>
+          <select
+            value={tz}
+            onChange={e => setTz(e.target.value)}
+            style={{
+              padding: '0.65rem 0.8rem', background: '#0a0f1e',
+              border: '1px solid #1e293b', borderRadius: '8px',
+              color: '#e2e8f0', fontSize: '0.82rem', width: '100%',
+            }}
+          >
+            {WORLD_CITIES.map(c => (
+              <option key={c.tz} value={c.tz}>{c.flag} {c.city}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '1rem' }}>
+        {FORMAT_PRESETS.map(p => (
+          <button
+            key={p.label} type="button"
+            onClick={() => setPattern(p.pattern)}
+            style={{
+              padding: '0.25rem 0.65rem', borderRadius: '5px', cursor: 'pointer',
+              fontSize: '0.72rem', fontWeight: 600, border: '1px solid #1e293b',
+              background: pattern === p.pattern ? '#6366f1' : '#0a0f1e',
+              color: pattern === p.pattern ? 'white' : '#64748b',
+            }}
+          >{p.label}</button>
+        ))}
+      </div>
+
+      <div style={{
+        background: err ? 'rgba(239,68,68,0.08)' : 'rgba(99,102,241,0.08)',
+        border: `1px solid ${err ? '#ef4444' : '#6366f1'}`,
+        borderRadius: '12px', padding: '1.75rem', textAlign: 'center', marginBottom: '1.5rem',
+      }}>
+        {err
+          ? <span style={{ color: '#ef4444', fontSize: '0.82rem', fontFamily: 'monospace' }}>{err}</span>
+          : <span style={{ color: '#e2e8f0', fontSize: '1.4rem', fontWeight: 700, letterSpacing: '-0.01em' }}>{result}</span>
+        }
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(145px,1fr))', gap: '0.35rem' }}>
+        {FORMAT_TOKENS.map(([tok, desc]) => (
+          <div
+            key={tok}
+            onClick={() => setPattern(prev => prev + tok)}
+            style={{
+              background: '#0a0f1e', border: '1px solid #1e293b', borderRadius: '6px',
+              padding: '0.35rem 0.6rem', display: 'flex', gap: '0.5rem', alignItems: 'center',
+              cursor: 'pointer',
+            }}
+          >
+            <code style={{ color: '#ec4899', fontSize: '0.7rem', fontWeight: 700, flexShrink: 0 }}>{tok}</code>
+            <span style={{ color: '#475569', fontSize: '0.62rem' }}>{desc}</span>
+          </div>
+        ))}
+      </div>
+      <p style={{ color: '#334155', fontSize: '0.7rem', marginTop: '0.5rem' }}>Click a token to append it to the pattern</p>
+    </div>
+  )
+}
+
+// ─── Date Arithmetic ──────────────────────────────────────────────────────────
+
+function DateArithmetic() {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+  if (!mounted) return null
+
+  const base = DateTime.now('Europe/Paris')
+
+  const ops: { label: string; dt: DateTime }[] = [
+    { label: 'base  (now in Paris)',                                        dt: base },
+    { label: '.add({ hours: 6 })',                                          dt: base.add({ hours: 6 }) },
+    { label: '.add({ days: 7 })',                                           dt: base.add({ days: 7 }) },
+    { label: '.add({ weeks: 2 })',                                          dt: base.add({ weeks: 2 }) },
+    { label: '.add({ months: 3 })',                                         dt: base.add({ months: 3 }) },
+    { label: '.add({ years: 1 })',                                          dt: base.add({ years: 1 }) },
+    { label: '.subtract({ hours: 12 })',                                    dt: base.subtract({ hours: 12 }) },
+    { label: '.subtract({ days: 10 })',                                     dt: base.subtract({ days: 10 }) },
+    { label: '.subtract({ months: 2 })',                                    dt: base.subtract({ months: 2 }) },
+    { label: '.startOf("day")',                                             dt: base.startOf('day') },
+    { label: '.endOf("day")',                                               dt: base.endOf('day') },
+    { label: '.startOf("week")',                                            dt: base.startOf('week') },
+    { label: '.endOf("week")',                                              dt: base.endOf('week') },
+    { label: '.startOf("month")',                                           dt: base.startOf('month') },
+    { label: '.endOf("month")',                                             dt: base.endOf('month') },
+    { label: '.startOf("year")',                                            dt: base.startOf('year') },
+    { label: '.endOf("year")',                                              dt: base.endOf('year') },
+    { label: '.toUTC()',                                                    dt: base.toUTC() },
+    { label: ".setTimezone('America/New_York')",                           dt: base.setTimezone('America/New_York') },
+    { label: ".setTimezone('Asia/Tokyo', { keepLocalTime: true })",        dt: base.setTimezone('Asia/Tokyo', { keepLocalTime: true }) },
+    { label: '.set({ hour: 0, minute: 0, second: 0 })',                    dt: base.set({ hour: 0, minute: 0, second: 0 }) },
+    { label: '.set({ month: 1, day: 1 })',                                 dt: base.set({ month: 1, day: 1 }) },
+  ]
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+      {ops.map(({ label, dt }, i) => (
+        <div key={label} style={{
+          background: '#0a0f1e',
+          borderLeft: `3px solid ${ACCENT_COLORS[i % ACCENT_COLORS.length]}`,
+          borderRadius: '0 8px 8px 0', padding: '0.6rem 0.9rem',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem',
+        }}>
+          <code style={{ color: '#64748b', fontSize: '0.7rem', fontFamily: 'monospace' }}>{label}</code>
+          <span style={{ color: ACCENT_COLORS[i % ACCENT_COLORS.length], fontSize: '0.8rem', fontFamily: 'monospace', fontWeight: 700, flexShrink: 0 }}>
+            {dt.format('YYYY-MM-DD HH:mm:ss Z')}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ─── Timezone Explorer ────────────────────────────────────────────────────────
+
+function TimezoneExplorer() {
+  const [query, setQuery] = useState('New York')
+  const [results, setResults] = useState<string[]>(['America/New_York'])
+  const [selected, setSelected] = useState<string>('America/New_York')
+  const [info, setInfo] = useState<{ valid: boolean; canon: string; offset: number; abbr: string; isDST: boolean; local: string; time: string } | null>(null)
+
+  useEffect(() => {
+    setResults(query.trim() ? Timezone.search(query).slice(0, 10) : [])
+  }, [query])
+
+  useEffect(() => {
+    const update = () => {
+      const now = Date.now()
+      setInfo({
+        valid:  Timezone.isValid(selected),
+        canon:  Timezone.getCanonical(selected),
+        offset: Timezone.getOffset(selected, now),
+        abbr:   Timezone.getAbbreviation(selected, now),
+        isDST:  Timezone.isDST(selected, now),
+        local:  Timezone.guessLocal(),
+        time:   DateTime.now(selected).format('HH:mm:ss'),
+      })
+    }
+    update()
+    const id = setInterval(update, 1000)
+    return () => clearInterval(id)
+  }, [selected])
+
+  return (
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '1rem', marginBottom: '1rem', alignItems: 'flex-end' }}>
+        <div>
+          <div style={{ color: '#64748b', fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.4rem' }}>Search Timezones (568 IANA zones)</div>
+          <input
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Pacific, America, Asia/T…"
+            style={{
+              width: '100%', padding: '0.65rem 0.8rem', background: '#0a0f1e',
+              border: '1px solid #1e293b', borderRadius: '8px', color: '#e2e8f0', fontSize: '0.9rem',
+            }}
+          />
+        </div>
+        <div style={{
+          background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)',
+          borderRadius: '8px', padding: '0.65rem 0.9rem',
+          color: '#a78bfa', fontSize: '0.75rem', fontFamily: 'monospace', whiteSpace: 'nowrap',
+        }}>
+          🌍 Local: {info?.local ?? '—'}
+        </div>
+      </div>
+
+      {results.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '1.25rem' }}>
+          {results.map(tz => (
+            <button
+              key={tz} type="button" onClick={() => setSelected(tz)}
+              style={{
+                padding: '0.3rem 0.65rem', borderRadius: '5px', cursor: 'pointer',
+                fontSize: '0.75rem', fontFamily: 'monospace', border: '1px solid #1e293b',
+                background: selected === tz ? '#6366f1' : '#0a0f1e',
+                color: selected === tz ? 'white' : '#64748b',
+                fontWeight: 600,
+              }}
+            >{tz}</button>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(155px,1fr))', gap: '0.75rem' }}>
+        {[
+          { l: 'Timezone',      v: selected,                   c: '#e2e8f0' },
+          { l: 'Valid',         v: info ? (info.valid ? '✅ Yes' : '❌ No') : '—', c: info?.valid ? '#10b981' : '#ef4444' },
+          { l: 'Canonical',     v: info?.canon ?? '—',                 c: '#f59e0b' },
+          { l: 'UTC Offset',    v: info ? fmtOffset(info.offset) : '—', c: '#06b6d4' },
+          { l: 'Abbreviation',  v: info?.abbr ?? '—',                  c: '#a78bfa' },
+          { l: 'DST Active',    v: info ? (info.isDST ? '🌞 Yes' : '❄️  No') : '—', c: info?.isDST ? '#fbbf24' : '#94a3b8' },
+          { l: 'Current Time',  v: info?.time ?? '—',                  c: '#34d399' },
+          { l: 'Offset (mins)', v: info ? String(info.offset) : '—',  c: '#fb923c' },
+        ].map(({ l, v, c }) => (
+          <Chip key={l} label={l} value={v} color={c} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─── Duration Workshop ────────────────────────────────────────────────────────
+
+function DurationWorkshop() {
+  const [years,   setYears]   = useState(0)
+  const [months,  setMonths]  = useState(0)
+  const [days,    setDays]    = useState(3)
+  const [hours,   setHours]   = useState(14)
+  const [minutes, setMinutes] = useState(30)
+  const [seconds, setSeconds] = useState(0)
+
+  const dur  = Duration.fromObject({ years, months, days, hours, minutes, seconds })
+  const neg  = dur.negate()
+  const iso  = Duration.fromISO('P1DT6H30M')
+  const ms   = Duration.fromMilliseconds(9_000_000)
+
+  const numStyle: React.CSSProperties = {
+    width: '100%', padding: '0.55rem', background: '#0a0f1e',
+    border: '1px solid #1e293b', borderRadius: '6px', color: '#e2e8f0',
+    fontSize: '0.9rem', textAlign: 'center',
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: '0.6rem', marginBottom: '1.5rem' }}>
+        {[
+          { label: 'Years',   val: years,   set: setYears },
+          { label: 'Months',  val: months,  set: setMonths },
+          { label: 'Days',    val: days,    set: setDays },
+          { label: 'Hours',   val: hours,   set: setHours },
+          { label: 'Minutes', val: minutes, set: setMinutes },
+          { label: 'Seconds', val: seconds, set: setSeconds },
+        ].map(({ label, val, set }) => (
+          <div key={label}>
+            <div style={{ color: '#64748b', fontSize: '0.62rem', fontWeight: 700, textTransform: 'uppercase', marginBottom: '0.3rem', textAlign: 'center' }}>{label}</div>
+            <input type="number" min={0} value={val} onChange={e => set(Number(e.target.value))} style={numStyle} />
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(220px,1fr))', gap: '0.75rem', marginBottom: '1.5rem' }}>
+        {[
+          { l: 'humanize()',                    v: dur.humanize(),                       c: '#10b981' },
+          { l: 'humanize({ short: true })',     v: dur.humanize({ short: true }),        c: '#06b6d4' },
+          { l: 'humanize({ largest: 2 })',      v: dur.humanize({ largest: 2 }),         c: '#f59e0b' },
+          { l: 'toISO()',                        v: dur.toISO(),                          c: '#a78bfa' },
+          { l: "format('H[h] m[m] s[s]')",      v: dur.format('H[h] m[m] s[s]'),        c: '#ec4899' },
+          { l: "format('HH:mm:ss')",            v: dur.format('HH:mm:ss'),              c: '#fb923c' },
+          { l: 'totalHours',                    v: dur.totalHours.toFixed(4),            c: '#34d399' },
+          { l: 'totalMinutes',                  v: dur.totalMinutes.toFixed(0),          c: '#60a5fa' },
+          { l: 'totalSeconds',                  v: dur.totalSeconds.toFixed(0),          c: '#f472b6' },
+          { l: 'totalMilliseconds',             v: dur.totalMilliseconds.toFixed(0),     c: '#fbbf24' },
+          { l: 'isZero()',                       v: String(dur.isZero()),                 c: '#94a3b8' },
+          { l: 'isNegative()',                   v: String(dur.isNegative()),             c: '#94a3b8' },
+          { l: 'negate().humanize()',           v: neg.humanize(),                       c: '#ef4444' },
+          { l: "fromISO('P1DT6H30M').humanize()", v: iso.humanize(),                    c: '#3b82f6' },
+          { l: 'fromMilliseconds(9_000_000)',   v: ms.humanize(),                        c: '#8b5cf6' },
+        ].map(({ l, v, c }) => (
+          <Chip key={l} label={l} value={v} color={c} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─── Relative Time ────────────────────────────────────────────────────────────
+
+function RelativeTimeDemo() {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+  if (!mounted) return null
+
+  const now = DateTime.now()
+  const cases = [
+    { label: '30 seconds ago',  dt: now.subtract({ seconds: 30 }) },
+    { label: '5 minutes ago',   dt: now.subtract({ minutes: 5 }) },
+    { label: '3 hours ago',     dt: now.subtract({ hours: 3 }) },
+    { label: 'Yesterday',       dt: now.subtract({ days: 1 }) },
+    { label: '4 days ago',      dt: now.subtract({ days: 4 }) },
+    { label: '1 week ago',      dt: now.subtract({ weeks: 1 }) },
+    { label: '3 months ago',    dt: now.subtract({ months: 3 }) },
+    { label: '2 years ago',     dt: now.subtract({ years: 2 }) },
+    { label: 'In 45 seconds',   dt: now.add({ seconds: 45 }) },
+    { label: 'In 20 minutes',   dt: now.add({ minutes: 20 }) },
+    { label: 'In 5 hours',      dt: now.add({ hours: 5 }) },
+    { label: 'Tomorrow',        dt: now.add({ days: 1 }) },
+    { label: 'In 5 days',       dt: now.add({ days: 5 }) },
+    { label: 'Next week',       dt: now.add({ weeks: 1 }) },
+    { label: 'Next month',      dt: now.add({ months: 1 }) },
+    { label: 'Next year',       dt: now.add({ years: 1 }) },
+  ]
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(250px,1fr))', gap: '0.75rem' }}>
+      {cases.map(({ label, dt }) => (
+        <div key={label} style={{
+          background: '#0a0f1e', border: '1px solid #1e293b', borderRadius: '10px', padding: '0.9rem',
+        }}>
+          <div style={{ color: '#94a3b8', fontSize: '0.7rem', fontWeight: 700, marginBottom: '0.5rem' }}>{label}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            {[
+              { k: 'fromNow()',              v: dt.fromNow(),               c: '#10b981' },
+              { k: 'fromNow({ short:true })', v: dt.fromNow({ short: true }), c: '#06b6d4' },
+              { k: 'toRelative()',           v: dt.toRelative(),            c: '#a78bfa' },
+            ].map(({ k, v, c }) => (
+              <div key={k} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <code style={{ color: '#334155', fontSize: '0.65rem', fontFamily: 'monospace' }}>{k}</code>
+                <span style={{ color: c, fontSize: '0.78rem', fontFamily: 'monospace', fontWeight: 700 }}>{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ─── LocalDate & LocalTime ────────────────────────────────────────────────────
+
+function LocalTypes() {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+  if (!mounted) return null
+
+  const today = LocalDate.today()
+  const now   = LocalTime.now()
+
+  const dateRows = [
+    { c: 'LocalDate.today()',                            v: today.toISO() },
+    { c: '.format("dddd, MMMM D YYYY")',                 v: today.format('dddd, MMMM D YYYY') },
+    { c: '.dayOfYear',                                   v: String(today.dayOfYear) },
+    { c: '.daysInMonth',                                 v: String(today.daysInMonth) },
+    { c: '.isLeapYear',                                  v: String(today.isLeapYear) },
+    { c: '.quarter',                                     v: String(today.quarter) },
+    { c: '.weekday  // 1=Mon 7=Sun',                     v: String(today.weekday) },
+    { c: 'month start: LocalDate.of(y, m, 1)',            v: LocalDate.of(today.year, today.month, 1).toISO() },
+    { c: 'month end:   LocalDate.of(y, m, daysInMonth)', v: LocalDate.of(today.year, today.month, today.daysInMonth).toISO() },
+    { c: 'year start:  LocalDate.of(y, 1, 1)',           v: LocalDate.of(today.year, 1, 1).toISO() },
+    { c: '.add({ months: 1 })',                          v: today.add({ months: 1 }).toISO() },
+    { c: '.subtract({ days: 30 })',                      v: today.subtract({ days: 30 }).toISO() },
+    { c: '.isBefore(today.add({ days: 1 }))',            v: String(today.isBefore(today.add({ days: 1 }))) },
+    { c: '.equals(LocalDate.today())',                   v: String(today.equals(LocalDate.today())) },
+    { c: ".until(today.add({ days: 30 })) days",        v: String(today.until(today.add({ days: 30 }))) + ' days' },
+    { c: "LocalDate.of(2024, 2, 29).toISO()",           v: LocalDate.of(2024, 2, 29).toISO() },
+    { c: "LocalDate.fromISO('2000-01-01').isLeapYear",   v: String(LocalDate.fromISO('2000-01-01').isLeapYear) },
+  ]
+
+  const timeRows = [
+    { c: 'LocalTime.now()',               v: now.toISO() },
+    { c: '.format("h:mm:ss A")',          v: now.format('h:mm:ss A') },
+    { c: '.format("HH:mm")',              v: now.format('HH:mm') },
+    { c: '.hour / .minute / .second',    v: `${now.hour} / ${now.minute} / ${now.second}` },
+    { c: '.add({ hours: 6 })',           v: now.add({ hours: 6 }).format('HH:mm:ss') },
+    { c: '.subtract({ minutes: 45 })',   v: now.subtract({ minutes: 45 }).format('HH:mm:ss') },
+    { c: "LocalTime.of(9, 0)",           v: LocalTime.of(9, 0).toISO() },
+    { c: "LocalTime.of(23, 59, 59)",     v: LocalTime.of(23, 59, 59).format('h:mm:ss A') },
+    { c: "LocalTime.fromISO('00:00')",   v: LocalTime.fromISO('00:00').format('h:mm A') },
+    { c: "LocalTime.fromISO('13:30')",   v: LocalTime.fromISO('13:30').format('h:mm A') },
+    { c: '.isBefore(LocalTime.of(23,59))', v: String(now.isBefore(LocalTime.of(23, 59))) },
+    { c: "add wraps at midnight: LocalTime.of(22,0).add({hours:3})", v: LocalTime.of(22, 0).add({ hours: 3 }).format('HH:mm') },
+  ]
+
+  const rowStyle = (color: string) => ({
+    background: '#0a0f1e', borderRadius: '7px', padding: '0.5rem 0.7rem',
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem',
+    borderLeft: `2px solid ${color}`,
+  })
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+      <div>
+        <h3 style={{ color: '#f59e0b', marginBottom: '0.75rem', fontSize: '0.95rem', fontWeight: 700 }}>📅 LocalDate</h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+          {dateRows.map(({ c, v }) => (
+            <div key={c} style={rowStyle('#f59e0b')}>
+              <code style={{ color: '#475569', fontSize: '0.65rem', fontFamily: 'monospace' }}>{c}</code>
+              <span style={{ color: '#f59e0b', fontSize: '0.75rem', fontFamily: 'monospace', fontWeight: 700, flexShrink: 0 }}>{v}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div>
+        <h3 style={{ color: '#ec4899', marginBottom: '0.75rem', fontSize: '0.95rem', fontWeight: 700 }}>🕐 LocalTime</h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+          {timeRows.map(({ c, v }) => (
+            <div key={c} style={rowStyle('#ec4899')}>
+              <code style={{ color: '#475569', fontSize: '0.65rem', fontFamily: 'monospace' }}>{c}</code>
+              <span style={{ color: '#ec4899', fontSize: '0.75rem', fontFamily: 'monospace', fontWeight: 700, flexShrink: 0 }}>{v}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Multi-Locale ─────────────────────────────────────────────────────────────
+
+function MultiLocaleShowcase() {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+  if (!mounted) return null
+
+  const ref = DateTime.now('Europe/Paris')
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))', gap: '1rem' }}>
+      {LOCALE_SHOWCASE.map(({ locale, name, flag }, i) => {
+        const dt = ref.setLocale(locale)
+        return (
+          <div key={name} style={{
+            background: '#0a0f1e', borderRadius: '12px', padding: '1.1rem',
+            border: `1px solid ${ACCENT_COLORS[i % ACCENT_COLORS.length]}22`,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.65rem' }}>
+              <span style={{ fontSize: '1.2rem' }}>{flag}</span>
+              <span style={{ color: '#e2e8f0', fontWeight: 700, fontSize: '0.9rem' }}>{name}</span>
+              <code style={{ color: '#334155', fontSize: '0.65rem', fontFamily: 'monospace', marginLeft: 'auto' }}>{locale.name}</code>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+              <div style={{ color: ACCENT_COLORS[i % ACCENT_COLORS.length], fontSize: '0.88rem', fontFamily: 'monospace' }}>
+                {dt.format('dddd, D MMMM YYYY')}
+              </div>
+              <div style={{ color: '#64748b', fontSize: '0.78rem', fontFamily: 'monospace' }}>
+                {dt.format('MMMM')} · {dt.format('ddd')} · {dt.format('h:mm A')}
+              </div>
+              <div style={{ color: '#475569', fontSize: '0.75rem', fontFamily: 'monospace' }}>
+                {dt.fromNow()}
+              </div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Comparisons ──────────────────────────────────────────────────────────────
+
+function ComparisonsDemo() {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+  if (!mounted) return null
+
+  const now         = DateTime.now()
+  const past2h      = now.subtract({ hours: 2 })
+  const future2h    = now.add({ hours: 2 })
+  const rangeStart  = now.subtract({ hours: 3 })
+  const rangeEnd    = now.add({ hours: 3 })
+  const sameDayPast = now.subtract({ hours: now.hour })  // start of today
+
+  const diff = future2h.diff(past2h)
+
+  const rows: { expr: string; result: string }[] = [
+    { expr: 'past2h.isBefore(now)',                      result: String(past2h.isBefore(now)) },
+    { expr: 'future2h.isBefore(now)',                    result: String(future2h.isBefore(now)) },
+    { expr: 'past2h.isAfter(now)',                       result: String(past2h.isAfter(now)) },
+    { expr: 'future2h.isAfter(now)',                     result: String(future2h.isAfter(now)) },
+    { expr: 'now.isSameOrBefore(future2h)',              result: String(now.isSameOrBefore(future2h)) },
+    { expr: 'now.isSameOrAfter(past2h)',                 result: String(now.isSameOrAfter(past2h)) },
+    { expr: 'now.isBetween(rangeStart, rangeEnd)',       result: String(now.isBetween(rangeStart, rangeEnd)) },
+    { expr: 'future2h.isBetween(rangeStart, rangeEnd)',  result: String(future2h.isBetween(rangeStart, rangeEnd)) },
+    { expr: 'now.isSame(now)',                           result: String(now.isSame(now)) },
+    { expr: "now.isSame(sameDayPast, 'day')",            result: String(now.isSame(sameDayPast, 'day')) },
+    { expr: "now.isSame(past2h, 'day')",                 result: String(now.isSame(past2h, 'day')) },
+    { expr: 'future2h.diff(past2h).humanize()',          result: diff.humanize() },
+    { expr: 'future2h.diff(past2h).totalHours + "h"',   result: diff.totalHours.toFixed(2) + 'h' },
+    { expr: 'DateTime.min(past2h, now, future2h).toISO()',   result: DateTime.min(past2h, now, future2h).format('HH:mm:ss') },
+    { expr: 'DateTime.max(past2h, now, future2h).toISO()',   result: DateTime.max(past2h, now, future2h).format('HH:mm:ss') },
+  ]
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: '0.6rem' }}>
+      {rows.map(({ expr, result }) => {
+        const isBool = result === 'true' || result === 'false'
+        const color  = isBool
+          ? (result === 'true' ? '#10b981' : '#ef4444')
+          : '#f59e0b'
+        return (
+          <div key={expr} style={{
+            background: '#0a0f1e',
+            border: `1px solid ${isBool ? (result === 'true' ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)') : 'rgba(245,158,11,0.15)'}`,
+            borderRadius: '8px', padding: '0.8rem',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem',
+          }}>
+            <code style={{ color: '#64748b', fontSize: '0.7rem', fontFamily: 'monospace' }}>{expr}</code>
+            <span style={{ color, fontSize: '0.85rem', fontFamily: 'monospace', fontWeight: 800, flexShrink: 0 }}>{result}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
+function Card({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      background: '#1e293b', borderRadius: '16px', padding: '2rem',
+      marginBottom: '1.5rem', border: '1px solid #334155',
+    }}>
+      {children}
+    </div>
+  )
+}
+
+export default function ChronoTzPage() {
+  return (
+    <>
+      <style>{`
+        html, body { background: #0f172a !important; }
+        @keyframes float { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-10px); } }
+        @keyframes pulse-ring {
+          0%   { box-shadow: 0 0 0 0   rgba(99,102,241,0.35); }
+          70%  { box-shadow: 0 0 0 20px rgba(99,102,241,0);   }
+          100% { box-shadow: 0 0 0 0   rgba(99,102,241,0);    }
+        }
+        @keyframes shimmer {
+          0%   { background-position: -400px 0; }
+          100% { background-position:  400px 0; }
+        }
+      `}</style>
+
+      <div style={{ background: '#0f172a', minHeight: '100vh', color: '#e2e8f0' }}>
+        <div style={{ maxWidth: 1200, margin: '0 auto', padding: '2rem' }}>
+
+          {/* ── Hero ── */}
+          <div style={{
+            background: 'linear-gradient(135deg,#0f0c29,#302b63,#24243e)',
+            borderRadius: '24px', padding: '3rem', marginBottom: '1.5rem',
+            position: 'relative', overflow: 'hidden',
+            border: '1px solid rgba(99,102,241,0.25)',
+            animation: 'pulse-ring 3s ease-out infinite',
+          }}>
+            <div style={{
+              position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+              background: 'radial-gradient(ellipse at 80% 50%,rgba(99,102,241,0.15) 0%,transparent 60%)',
+              pointerEvents: 'none',
+            }} />
+            <div style={{
+              position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+              background: 'radial-gradient(ellipse at 20% 80%,rgba(6,182,212,0.08) 0%,transparent 50%)',
+              pointerEvents: 'none',
+            }} />
+
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1.5rem', position: 'relative' }}>
+              <div>
+                <div style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
+                  background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.35)',
+                  padding: '0.3rem 0.8rem', borderRadius: '2rem', marginBottom: '1rem',
+                }}>
+                  <code style={{ color: '#a78bfa', fontSize: '0.75rem', fontWeight: 700 }}>@yedoma-labs/tuuru-chrono-tz</code>
+                  <span style={{ background: '#6366f1', color: 'white', padding: '0.1rem 0.45rem', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 800 }}>v0.1.0</span>
+                </div>
+
+                <h1 style={{
+                  fontSize: 'clamp(2rem,5vw,3.5rem)', fontWeight: 900, margin: '0 0 0.5rem',
+                  background: 'linear-gradient(135deg,#e2e8f0 0%,#a78bfa 40%,#06b6d4 80%)',
+                  WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text', lineHeight: 1.05,
+                }}>
+                  tuuru-chrono-tz
+                </h1>
+
+                <p style={{ color: '#94a3b8', fontSize: '1rem', margin: '0 0 1.5rem', maxWidth: 520 }}>
+                  TypeScript-first date/time library with full IANA timezone support.
+                  Immutable API. Zero dependencies. &lt;20&nbsp;KB.
+                </p>
+
+                <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                  {['Zero Dependencies','Immutable API','568 IANA Zones','35+ Locales','<20KB Bundle','Node ≥ 18'].map(tag => (
+                    <span key={tag} style={{
+                      padding: '0.3rem 0.7rem', background: 'rgba(99,102,241,0.12)',
+                      border: '1px solid rgba(99,102,241,0.25)', borderRadius: '6px',
+                      color: '#a78bfa', fontSize: '0.72rem', fontWeight: 700,
+                    }}>{tag}</span>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ fontSize: '5.5rem', lineHeight: 1, animation: 'float 4s ease-in-out infinite', flexShrink: 0 }}>
+                ⏰
+              </div>
+            </div>
+          </div>
+
+          {/* Nav */}
+          <div style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <Link href="/" style={{ color: '#6366f1', textDecoration: 'none', fontSize: '0.85rem' }}>← All Demos</Link>
+            <span style={{ color: '#1e293b' }}>·</span>
+            <a href="https://www.npmjs.com/package/@yedoma-labs/tuuru-chrono-tz" target="_blank" rel="noopener noreferrer"
+              style={{ color: '#6366f1', textDecoration: 'none', fontSize: '0.85rem' }}>npm ↗</a>
+          </div>
+
+          {/* ── Sections ── */}
+
+          <Card>
+            <SectionHeader
+              emoji="🌍" title="Live World Clock"
+              subtitle="DateTime.now(timezone) — updates every second, timezone-aware offsets, abbreviations and DST status"
+              gradient="linear-gradient(135deg,#1e3a8a,#3b82f6)"
+            />
+            <WorldClock />
+            <div style={{ marginTop: '1.5rem' }}>
+              <CodeBlock code={`import { DateTime, Timezone } from '@yedoma-labs/tuuru-chrono-tz';
+
+const tokyo = DateTime.now('Asia/Tokyo');
+const nyc   = DateTime.now('America/New_York');
+
+tokyo.format('HH:mm:ss');           // "19:30:00"
+nyc.format('HH:mm:ss');             // "06:30:00"
+nyc.offset;                         // -300 (winter) or -240 (DST)
+
+Timezone.getAbbreviation('America/New_York');   // "EST" or "EDT"
+Timezone.isDST('America/New_York', Date.now()); // true in summer
+Timezone.guessLocal();                          // 'America/New_York'`} />
+            </div>
+          </Card>
+
+          <Card>
+            <SectionHeader
+              emoji="🏗️" title="DateTime Construction Lab"
+              subtitle="Every factory method — fromISO, fromFormat, fromObject, fromMilliseconds, fromUnix, fromDate, min, max, plus all getters"
+              gradient="linear-gradient(135deg,#4c1d95,#8b5cf6)"
+            />
+            <ConstructionLab />
+          </Card>
+
+          <Card>
+            <SectionHeader
+              emoji="🎨" title="Format Playground"
+              subtitle="Type any pattern, pick a timezone, see the result live. Click tokens below to append them."
+              gradient="linear-gradient(135deg,#831843,#ec4899)"
+            />
+            <FormatPlayground />
+          </Card>
+
+          <Card>
+            <SectionHeader
+              emoji="➕" title="Date Arithmetic"
+              subtitle="add(), subtract(), startOf(), endOf(), set(), setTimezone() — all immutable, all calendar-aware"
+              gradient="linear-gradient(135deg,#064e3b,#10b981)"
+            />
+            <DateArithmetic />
+            <div style={{ marginTop: '1.5rem' }}>
+              <CodeBlock code={`const paris = DateTime.now('Europe/Paris');
+
+paris.add({ weeks: 2 })                                  // +14 days
+paris.add({ months: 3 })                                 // calendar-aware month jump
+paris.subtract({ hours: 12 })                            // -12 hours (absolute)
+paris.startOf('week')                                    // Monday 00:00:00.000
+paris.endOf('month')                                     // last ms of the month
+paris.set({ hour: 9, minute: 0, second: 0 })             // set specific fields
+paris.setTimezone('Asia/Tokyo')                          // same instant, Tokyo wall clock
+paris.setTimezone('Asia/Tokyo', { keepLocalTime: true }) // same wall clock, different instant
+paris.toUTC()                                            // convert to UTC`} />
+            </div>
+          </Card>
+
+          <Card>
+            <SectionHeader
+              emoji="🗺️" title="Timezone Explorer"
+              subtitle="Fuzzy-search all 568 IANA zones — isValid, getCanonical, getOffset, getAbbreviation, isDST, guessLocal"
+              gradient="linear-gradient(135deg,#78350f,#f59e0b)"
+            />
+            <TimezoneExplorer />
+            <div style={{ marginTop: '1.5rem' }}>
+              <CodeBlock code={`Timezone.search('Pacific')            // ['Pacific/Auckland', 'Pacific/Fiji', ...]
+Timezone.isValid('America/New_York')   // true
+Timezone.isValid('US/Eastern')         // true (alias link)
+Timezone.getCanonical('US/Eastern')    // 'America/New_York'
+Timezone.getOffset('Asia/Tokyo')       // 540 (minutes, east-positive)
+Timezone.getOffset('America/New_York') // -300 (winter) or -240 (DST)
+Timezone.getAbbreviation('Asia/Tokyo') // 'JST'
+Timezone.isDST('America/New_York', Date.now()) // true in summer
+Timezone.guessLocal()                  // 'America/New_York'
+Timezone.listAll().length              // 568+`} />
+            </div>
+          </Card>
+
+          <Card>
+            <SectionHeader
+              emoji="⏱️" title="Duration Workshop"
+              subtitle="Adjust the fields — humanize(), format(), toISO(), totalHours, negate(), and more update live"
+              gradient="linear-gradient(135deg,#0e7490,#06b6d4)"
+            />
+            <DurationWorkshop />
+            <div style={{ marginTop: '1rem' }}>
+              <CodeBlock code={`import { Duration } from '@yedoma-labs/tuuru-chrono-tz';
+
+const dur = Duration.fromObject({ days: 3, hours: 14, minutes: 30 });
+dur.humanize()                   // "3 days, 14 hours, 30 minutes"
+dur.humanize({ short: true })    // "3d 14h 30m"
+dur.humanize({ largest: 2 })     // "3 days, 14 hours"
+dur.toISO()                      // "P3DT14H30M"
+dur.format('H[h] m[m] s[s]')    // "86h 30m 0s"
+dur.totalHours                   // 86.5
+dur.negate().humanize()          // "-3 days, -14 hours, -30 minutes"
+dur.isZero()                     // false
+
+// Parse ISO 8601 duration strings
+Duration.fromISO('P1DT6H30M').humanize()  // "1 day, 6 hours, 30 minutes"
+Duration.fromISO('PT2H').toISO()          // "PT2H"
+
+// From raw milliseconds
+Duration.fromMilliseconds(9_000_000).humanize()  // "2 hours, 30 minutes"
+
+// Diff between two DateTimes
+const diff = dateB.diff(dateA);
+diff.humanize()       // "5 days, 3 hours"
+diff.totalHours       // 123.0`} />
+            </div>
+          </Card>
+
+          <Card>
+            <SectionHeader
+              emoji="🕐" title="Relative Time"
+              subtitle="fromNow(), fromNow({ short }), toRelative() — all past & future intervals"
+              gradient="linear-gradient(135deg,#312e81,#6366f1)"
+            />
+            <RelativeTimeDemo />
+            <div style={{ marginTop: '1.5rem' }}>
+              <CodeBlock code={`const past   = DateTime.now().subtract({ hours: 3 });
+const future = DateTime.now().add({ days: 1 });
+
+past.fromNow()                // "3 hours ago"
+past.fromNow({ short: true }) // "3h ago"
+past.toRelative()             // "today"  (same calendar day)
+
+future.fromNow()              // "in a day"
+future.toRelative()           // "tomorrow"
+
+// Relative from one date to another
+a.to(b)   // "in 3 days"
+a.to(b, { short: true }) // "in 3d"`} />
+            </div>
+          </Card>
+
+          <Card>
+            <SectionHeader
+              emoji="📅" title="LocalDate & LocalTime"
+              subtitle="No timezone, no time (LocalDate) or no timezone, no date (LocalTime) — ideal for birthdays, schedules, business hours"
+              gradient="linear-gradient(135deg,#78350f,#f59e0b)"
+            />
+            <LocalTypes />
+            <div style={{ marginTop: '1.5rem' }}>
+              <CodeBlock code={`import { LocalDate, LocalTime } from '@yedoma-labs/tuuru-chrono-tz';
+
+// LocalDate — date without time or timezone
+const today = LocalDate.today();
+today.format('dddd, MMMM D, YYYY')                        // locale-aware
+today.add({ months: 1 })                                  // Jan 31 + 1 month = Feb 28/29
+LocalDate.of(today.year, today.month, 1).toISO()          // "2025-06-01"  (month start)
+LocalDate.of(today.year, today.month, today.daysInMonth)  // month end
+today.until(today.add({ days: 30 }))                      // 30 (days between)
+today.toDateTime('America/New_York', { hour: 9 })         // → DateTime at 9am today in NYC
+
+// LocalTime — time without date or timezone
+const now = LocalTime.now();
+now.format('h:mm:ss A')                      // "2:30:45 PM"
+now.add({ hours: 6 })                        // wraps past midnight
+LocalTime.of(9, 30)                          // 09:30:00
+LocalTime.fromISO('23:59:59')
+
+// Both support isBefore / isAfter / isBetween / isSame
+today.isBefore(today.add({ days: 1 }))       // true`} />
+            </div>
+          </Card>
+
+          <Card>
+            <SectionHeader
+              emoji="🌐" title="35 Locales"
+              subtitle="Same instant in 10 languages — format() month/weekday names and fromNow() both use the locale"
+              gradient="linear-gradient(135deg,#064e3b,#10b981)"
+            />
+            <MultiLocaleShowcase />
+            <div style={{ marginTop: '1.5rem' }}>
+              <CodeBlock code={`import { DateTime, fr, ja, ar, zh, de } from '@yedoma-labs/tuuru-chrono-tz';
+
+const dt = DateTime.now('Europe/Paris');
+
+// Per-instance locale (immutable chain)
+dt.setLocale(fr).format('dddd D MMMM YYYY')  // "jeudi 12 juin 2025"
+dt.setLocale(ja).format('MMMM D日')           // "6月12日"
+dt.setLocale(ar).fromNow()                    // "منذ دقائق"
+dt.setLocale(zh).format('MMMM')              // "六月"
+dt.setLocale(de).format('dddd')              // "Donnerstag"
+
+// Global default (affects all instances)
+DateTime.setDefaultLocale(fr);
+DateTime.now().format('MMMM')                // "juin"
+
+// Shipped: en zh hi es bn pt ru id ja de fr ko tr vi pl nl th it ar fa ur uk ...`} />
+            </div>
+          </Card>
+
+          <Card>
+            <SectionHeader
+              emoji="⚖️" title="Comparisons & Diff"
+              subtitle="isBefore, isAfter, isBetween, isSame, isSameOrBefore, isSameOrAfter, diff(), min(), max()"
+              gradient="linear-gradient(135deg,#7f1d1d,#ef4444)"
+            />
+            <ComparisonsDemo />
+            <div style={{ marginTop: '1.5rem' }}>
+              <CodeBlock code={`const a = DateTime.now();
+const b = a.add({ hours: 2 });
+
+a.isBefore(b)                  // true
+b.isAfter(a)                   // true
+a.isSameOrBefore(b)            // true
+a.isBetween(a.subtract({h:1}), b) // true
+a.isSame(b)                    // false
+a.isSame(b, 'day')             // true  (same calendar day in a's tz)
+
+// Typed diff
+const d = b.diff(a);           // Duration
+d.humanize()                   // "2 hours"
+d.totalMinutes                 // 120
+
+// Static min/max
+DateTime.min(a, b, c)          // earliest
+DateTime.max(a, b, c)          // latest`} />
+            </div>
+          </Card>
+
+          {/* Footer */}
+          <div style={{
+            textAlign: 'center', padding: '2rem 1rem',
+            borderTop: '1px solid #1e293b', color: '#334155',
+          }}>
+            <p style={{ marginBottom: '0.5rem' }}>
+              <span style={{
+                background: 'linear-gradient(135deg,#a78bfa,#06b6d4)',
+                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text', fontWeight: 800, fontSize: '1rem',
+              }}>
+                @yedoma-labs/tuuru-chrono-tz
+              </span>
+              <span style={{ color: '#1e293b', margin: '0 0.75rem' }}>·</span>
+              <span style={{ color: '#475569', fontSize: '0.82rem' }}>
+                TypeScript-first · Zero deps · IANA 2026b · &lt;20KB
+              </span>
+            </p>
+            <p style={{ fontSize: '0.8rem' }}>
+              <Link href="/" style={{ color: '#6366f1', textDecoration: 'none' }}>← Yedoma Labs Demo Hub</Link>
+              <span style={{ color: '#1e293b', margin: '0 0.75rem' }}>·</span>
+              <a href="https://www.npmjs.com/package/@yedoma-labs/tuuru-chrono-tz" target="_blank" rel="noopener noreferrer" style={{ color: '#6366f1', textDecoration: 'none' }}>npm ↗</a>
+            </p>
+          </div>
+
+        </div>
+      </div>
+    </>
+  )
+}
